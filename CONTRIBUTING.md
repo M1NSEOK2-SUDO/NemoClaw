@@ -88,6 +88,11 @@ See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the full style guide and wr
 
 ## Pull Requests
 
+We welcome contributions. Every PR requires maintainer review. To keep the review queue healthy, limit the number of open PRs you have at any time to fewer than 10.
+
+> [!WARNING]
+> Accounts that repeatedly exceed this limit or submit automated bulk PRs may have their PRs closed or their access restricted.
+
 Follow these steps to submit a pull request.
 
 1. Create a feature branch from `main`.
