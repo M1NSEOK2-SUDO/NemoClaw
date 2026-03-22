@@ -963,7 +963,31 @@ async function onboard(opts = {}) {
   await setupInference(sandboxName, model, provider);
   await setupOpenclaw(sandboxName, model, provider);
   await setupPolicies(sandboxName);
+  startMessagingBridges(sandboxName);
   printDashboard(sandboxName, model, provider);
+}
+
+// ── Auto-start messaging bridges ────────────────────────────────
+// RISKY CHANGE: This is a migration path to standardize messaging
+// configuration. We auto-start host-side bridges when tokens are
+// detected, which takes over from the in-sandbox OpenClaw plugin
+// (Discord/Slack enforce single gateway connections per token).
+// The in-sandbox env var passthrough (#601) is kept for backwards
+// compatibility during this transition.
+
+function startMessagingBridges(sandboxName) {
+  const hasMessagingToken =
+    getCredential("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN ||
+    getCredential("DISCORD_BOT_TOKEN") || process.env.DISCORD_BOT_TOKEN ||
+    getCredential("SLACK_BOT_TOKEN") || process.env.SLACK_BOT_TOKEN;
+
+  if (!hasMessagingToken) return;
+
+  console.log("");
+  console.log("  Starting messaging bridges...");
+  const safeName = sandboxName && /^[a-zA-Z0-9._-]+$/.test(sandboxName) ? sandboxName : null;
+  const sandboxEnv = safeName ? `SANDBOX_NAME=${shellQuote(safeName)}` : "";
+  run(`${sandboxEnv} bash "${SCRIPTS}/start-services.sh"`, { ignoreError: true });
 }
 
 module.exports = {
