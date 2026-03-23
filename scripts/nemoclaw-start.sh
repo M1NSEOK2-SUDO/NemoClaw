@@ -98,7 +98,7 @@ while time.time() < DEADLINE:
     paired = data.get('paired') or []
     has_browser = any((d.get('clientId') == 'openclaw-control-ui') or (d.get('clientMode') == 'webchat') for d in paired if isinstance(d, dict))
 
-    if pending:
+    if pending and APPROVED == 0:
         QUIET_POLLS = 0
         for device in pending:
             if not isinstance(device, dict):
