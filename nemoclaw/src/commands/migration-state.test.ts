@@ -562,11 +562,14 @@ describe("commands/migration-state", () => {
       };
 
       const bundle = createSnapshotBundle(hostState, logger, { persist: false });
-      expect(bundle).not.toBeNull();
+      if (bundle === null) {
+        expect.unreachable("bundle should not be null");
+        return;
+      }
 
       // auth-profiles.json should not exist anywhere in the snapshot
       const snapshotKeys = [...store.keys()].filter((k) =>
-        k.startsWith(bundle!.snapshotDir),
+        k.startsWith(bundle.snapshotDir),
       );
       const authProfileKeys = snapshotKeys.filter((k) => k.endsWith("auth-profiles.json"));
       expect(authProfileKeys).toHaveLength(0);
@@ -601,14 +604,20 @@ describe("commands/migration-state", () => {
       };
 
       const bundle = createSnapshotBundle(hostState, logger, { persist: false });
-      expect(bundle).not.toBeNull();
+      if (bundle === null) {
+        expect.unreachable("bundle should not be null");
+        return;
+      }
 
       // Read the sandbox-bundle openclaw.json
       const sandboxConfigEntry = store.get(
-        bundle!.preparedStateDir + "/openclaw.json",
+        bundle.preparedStateDir + "/openclaw.json",
       );
-      expect(sandboxConfigEntry).toBeDefined();
-      const sandboxConfig = JSON.parse(sandboxConfigEntry!.content!);
+      if (!sandboxConfigEntry || !sandboxConfigEntry.content) {
+        expect.unreachable("sandbox config entry should exist with content");
+        return;
+      }
+      const sandboxConfig = JSON.parse(sandboxConfigEntry.content);
       expect(sandboxConfig).not.toHaveProperty("gateway");
       expect(sandboxConfig).toHaveProperty("version", 1);
     });
@@ -639,9 +648,12 @@ describe("commands/migration-state", () => {
         persist: false,
         blueprintPath: "/test/blueprint.yaml",
       });
-      expect(bundle).not.toBeNull();
-      expect(typeof bundle!.manifest.blueprintDigest).toBe("string");
-      expect(bundle!.manifest.blueprintDigest!.length).toBeGreaterThan(0);
+      if (bundle === null) {
+        expect.unreachable("bundle should not be null");
+        return;
+      }
+      expect(typeof bundle.manifest.blueprintDigest).toBe("string");
+      expect((bundle.manifest.blueprintDigest ?? "").length).toBeGreaterThan(0);
     });
 
     it("blueprintDigest is null when no blueprintPath given", () => {
@@ -666,8 +678,11 @@ describe("commands/migration-state", () => {
       };
 
       const bundle = createSnapshotBundle(hostState, logger, { persist: false });
-      expect(bundle).not.toBeNull();
-      expect(bundle!.manifest.blueprintDigest).toBeNull();
+      if (bundle === null) {
+        expect.unreachable("bundle should not be null");
+        return;
+      }
+      expect(bundle.manifest.blueprintDigest).toBeNull();
     });
   });
 
@@ -1068,8 +1083,11 @@ describe("commands/migration-state", () => {
           persist: false,
           blueprintPath: "/test/blueprint.yaml",
         });
-        expect(bundle).not.toBeNull();
-        const digest = bundle!.manifest.blueprintDigest;
+        if (bundle === null) {
+          expect.unreachable("bundle should not be null");
+          return;
+        }
+        const digest = bundle.manifest.blueprintDigest;
         expect(digest).toBeTruthy();
 
         // Now set up for restore with matching digest

@@ -625,7 +625,7 @@ export function createSnapshotBundle(
     for (const root of hostState.externalRoots) {
       const destination = path.join(parentDir, root.snapshotRelativePath);
       mkdirSync(path.dirname(destination), { recursive: true });
-      copyDirectory(root.sourcePath, destination);
+      copyDirectory(root.sourcePath, destination, { stripCredentials: true });
       externalRoots.push({
         ...root,
         symlinkPaths: collectSymlinkPaths(root.sourcePath),
