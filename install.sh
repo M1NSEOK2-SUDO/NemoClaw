@@ -187,10 +187,10 @@ spin() {
 
 command_exists() { command -v "$1" &>/dev/null; }
 
-MIN_NODE_MAJOR=20
+MIN_NODE_MAJOR=22
 MIN_NPM_MAJOR=10
 RECOMMENDED_NODE_MAJOR=22
-RUNTIME_REQUIREMENT_MSG="NemoClaw requires Node.js >=${MIN_NODE_MAJOR} and npm >=${MIN_NPM_MAJOR} (recommended Node.js ${RECOMMENDED_NODE_MAJOR})."
+RUNTIME_REQUIREMENT_MSG="NemoClaw requires Node.js >=${MIN_NODE_MAJOR} and npm >=${MIN_NPM_MAJOR}."
 NEMOCLAW_SHIM_DIR="${HOME}/.local/bin"
 ORIGINAL_PATH="${PATH:-}"
 
