@@ -40,11 +40,11 @@ Naming:
   override specific names when the heuristic doesn't produce the right result.
 
 Usage:
-    python scripts/docs-to-skills.py docs/ .agents/skills/ --prefix nemoclaw
-    python scripts/docs-to-skills.py docs/ output/ --prefix nemoclaw --dry-run
-    python scripts/docs-to-skills.py docs/ output/ --strategy individual --prefix nemoclaw
-    python scripts/docs-to-skills.py docs/ output/ --prefix nemoclaw --name-map about=overview
-    python scripts/docs-to-skills.py docs/ output/ --exclude "release-notes.md"
+    python scripts/docs-to-skills.py docs/ .agents/skills/ .claude/skills/ --prefix nemoclaw
+    python scripts/docs-to-skills.py docs/ .claude/skills/ --prefix nemoclaw --dry-run
+    python scripts/docs-to-skills.py docs/ .agents/skills/ --strategy individual --prefix nemoclaw
+    python scripts/docs-to-skills.py docs/ .claude/skills/ --prefix nemoclaw --name-map about=overview
+    python scripts/docs-to-skills.py docs/ .claude/skills/ --exclude "release-notes.md"
 """
 
 from __future__ import annotations
@@ -892,7 +892,7 @@ CONTENT_TYPE_ROLE = {
 def generate_skill(
     name: str,
     pages: list[DocPage],
-    output_dir: Path,
+    output_dirs: list[Path],
     *,
     docs_dir: Path | None = None,
     doc_to_skill: dict[str, str] | None = None,
@@ -900,6 +900,7 @@ def generate_skill(
 ) -> dict:
     """Generate a complete skill directory from a group of doc pages.
 
+    Writes identical output to each directory in *output_dirs*.
     Returns a summary dict for reporting.
     """
     keywords = extract_trigger_keywords(pages)
@@ -1074,10 +1075,9 @@ def generate_skill(
         ref_files[ref_name] = body
 
     # --- Write output ---
-    skill_dir = output_dir / name
     summary = {
         "name": name,
-        "dir": str(skill_dir),
+        "dirs": [str(d / name) for d in output_dirs],
         "pages": [str(p.path) for p in pages],
         "skill_md_lines": len(skill_md.split("\n")),
         "reference_files": list(ref_files.keys()),
@@ -1087,14 +1087,16 @@ def generate_skill(
         summary["dry_run"] = True
         return summary
 
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(skill_md.rstrip("\n") + "\n", encoding="utf-8")
+    for output_dir in output_dirs:
+        skill_dir = output_dir / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(skill_md.rstrip("\n") + "\n", encoding="utf-8")
 
-    if ref_files:
-        refs_dir = skill_dir / "references"
-        refs_dir.mkdir(exist_ok=True)
-        for fname, content in ref_files.items():
-            (refs_dir / fname).write_text(content.rstrip("\n") + "\n", encoding="utf-8")
+        if ref_files:
+            refs_dir = skill_dir / "references"
+            refs_dir.mkdir(exist_ok=True)
+            for fname, content in ref_files.items():
+                (refs_dir / fname).write_text(content.rstrip("\n") + "\n", encoding="utf-8")
 
     return summary
 
@@ -1201,17 +1203,18 @@ def main():
               smart       Group by directory, merge concept pages as context
 
             Examples:
-              %(prog)s docs/ .agents/skills/generated/ --prefix nemoclaw
-              %(prog)s docs/ output/ --strategy individual --prefix nemoclaw
-              %(prog)s docs/ output/ --prefix nemoclaw --name-map about=overview
-              %(prog)s docs/ output/ --strategy smart --dry-run
+              %(prog)s docs/ .agents/skills/ .claude/skills/ --prefix nemoclaw
+              %(prog)s docs/ .claude/skills/ --strategy individual --prefix nemoclaw
+              %(prog)s docs/ .claude/skills/ --prefix nemoclaw --name-map about=overview
+              %(prog)s docs/ .agents/skills/ --strategy smart --dry-run
         """),
     )
     parser.add_argument(
         "docs_dir", type=Path, help="Path to the documentation directory"
     )
     parser.add_argument(
-        "output_dir", type=Path, help="Output directory for generated skills"
+        "output_dirs", type=Path, nargs="+",
+        help="Output directories for generated skills (e.g. .agents/skills/ .claude/skills/)",
     )
     parser.add_argument(
         "--strategy",
@@ -1322,16 +1325,15 @@ def main():
                 pass
 
     # Generate skills
-    print(
-        f"\n{'[DRY RUN] ' if args.dry_run else ''}Generating skills to {args.output_dir}/"
-    )
+    dirs_str = ", ".join(str(d) for d in args.output_dirs)
+    print(f"\n{'[DRY RUN] ' if args.dry_run else ''}Generating skills to {dirs_str}")
     summaries: list[dict] = []
     for group_name, group_pages in sorted(groups.items()):
         name = skill_names[group_name]
         summary = generate_skill(
             name,
             group_pages,
-            args.output_dir,
+            args.output_dirs,
             docs_dir=docs_dir_resolved,
             doc_to_skill=doc_to_skill,
             dry_run=args.dry_run,
@@ -1364,7 +1366,7 @@ def main():
 
     if args.dry_run:
         print("\nDry run complete. No files were written.")
-        print(f"Re-run without --dry-run to generate skills in {args.output_dir}/")
+        print(f"Re-run without --dry-run to generate skills in {dirs_str}")
 
 
 if __name__ == "__main__":
