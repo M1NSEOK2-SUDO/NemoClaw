@@ -7,6 +7,11 @@ import bridge from "../scripts/telegram-bridge.js";
 const { getInstantReply, isLatencyMessage, shouldUseDirectChat } = bridge;
 
 describe("telegram bridge routing", () => {
+  it("introduces itself as NemoClaw in lightweight replies", () => {
+    expect(getInstantReply("안녕")).toContain("네모클로");
+    expect(getInstantReply("현재 모델 뭐야?")).toContain("네모클로");
+  });
+
   it("recognizes latency complaints as lightweight status messages", () => {
     expect(isLatencyMessage("네모클로 응답이 또 늦어져..")).toBe(true);
     expect(getInstantReply("네모클로 응답이 또 늦어져..")).toContain("바로 답");

@@ -32,6 +32,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const API_KEY = process.env.NVIDIA_API_KEY || "";
 const SANDBOX = process.env.SANDBOX_NAME || "nemoclaw";
 const MODEL_NAME = process.env.NEMOCLAW_MODEL || process.env.MODEL_NAME || "configured local model";
+const ASSISTANT_NAME = process.env.NEMOCLAW_ASSISTANT_NAME || "네모클로";
 const ALLOWED_CHATS = process.env.ALLOWED_CHAT_IDS
   ? process.env.ALLOWED_CHAT_IDS.split(",").map((s) => s.trim())
   : null;
@@ -123,23 +124,23 @@ function getInstantReply(text) {
   if (!normalized) return null;
 
   if (/^(하이|ㅎㅇ|안녕|안녕[?？!]??|안녕하세요|hello|hi)\s*$/i.test(normalized)) {
-    return "안녕하세요. 반응 잘 하고 있어요. 무엇을 도와드릴까요?";
+    return `안녕하세요. ${ASSISTANT_NAME}예요. 무엇을 도와드릴까요?`;
   }
 
   if (/^(오|오오|오케이|ok|ㅇㅋ|응|웅|ㅇㅇ)\s*$/i.test(normalized)) {
-    return "네, 듣고 있어요. 이어서 말씀해 주세요.";
+    return `네, ${ASSISTANT_NAME}가 듣고 있어요. 이어서 말씀해 주세요.`;
   }
 
   if (/(반응이?\s*없|응답이?\s*없|답이?\s*없|살아있|멈춘거|멈춘 거|왜 답)/i.test(normalized)) {
-    return "반응하고 있어요. 간단한 인사나 상태 확인은 제가 바로 답하고, 실제 작업 요청은 이어서 처리할게요.";
+    return `${ASSISTANT_NAME}는 반응하고 있어요. 간단한 인사나 상태 확인은 제가 바로 답하고, 실제 작업 요청은 샌드박스에서 이어서 처리할게요.`;
   }
 
   if (isLatencyMessage(normalized)) {
-    return "지금 확인하고 있어요. 짧은 상태 대화는 바로 답하도록 맞추고 있고, 계속 느리면 로그 확인이나 실제 작업 요청으로 이어서 볼게요.";
+    return `${ASSISTANT_NAME}가 지금 확인하고 있어요. 짧은 상태 대화는 바로 답하도록 맞추고 있고, 계속 느리면 로그 확인이나 실제 작업 요청으로 이어서 볼게요.`;
   }
 
   if (/(지금\s*(사용|쓰는).*(모델|llm)|어떤\s*모델|현재\s*모델)/i.test(normalized)) {
-    return `지금은 ${MODEL_NAME} 모델을 사용 중이에요.`;
+    return `${ASSISTANT_NAME}는 지금 ${MODEL_NAME} 모델을 사용 중이에요.`;
   }
 
   return null;
@@ -246,7 +247,7 @@ function runDirectChatInSandbox(message) {
     const { confDir, confPath } = createSshConfig();
     const promptB64 = Buffer.from(String(message), "utf8").toString("base64");
     const systemB64 = Buffer.from(
-      "You are NemoClaw's Telegram assistant. Reply briefly in Korean unless the user clearly asks for another language. Be concise and practical.",
+      "You are NemoClaw (네모클로), Minseok's sandboxed Telegram assistant. If asked who you are, identify yourself as 네모클로. Reply briefly in Korean unless the user clearly asks for another language. Be concise and practical.",
       "utf8",
     ).toString("base64");
     const pythonCode = [
@@ -360,11 +361,10 @@ async function poll() {
           resetSession(chatId);
           await sendMessage(
             chatId,
-            "🦀 *NemoClaw*\n\n" +
-              "Send me a message and I'll run it through the OpenClaw agent " +
-              "inside an OpenShell sandbox.\n\n" +
-              `Current model: *${MODEL_NAME}*\n\n` +
-              "If the agent needs external access, the TUI will prompt for approval.",
+            `🦀 *${ASSISTANT_NAME}*\n\n` +
+              `${ASSISTANT_NAME}예요. 텔레그램 메시지를 받아 OpenShell 샌드박스 안에서 작업을 이어서 처리합니다.\n\n` +
+              `현재 모델: *${MODEL_NAME}*\n\n` +
+              "짧은 대화는 바로 답하고, 실제 작업 요청은 OpenClaw 에이전트로 넘겨 실행해요.",
             msg.message_id,
           );
           continue;
@@ -374,7 +374,7 @@ async function poll() {
         if (msg.text === "/reset") {
           const nextSessionId = resetSession(chatId);
           console.log(`[${chatId}] session reset -> ${nextSessionId}`);
-          await sendMessage(chatId, "Session reset.", msg.message_id);
+          await sendMessage(chatId, `${ASSISTANT_NAME} 세션을 새로 시작했어요.`, msg.message_id);
           continue;
         }
 
