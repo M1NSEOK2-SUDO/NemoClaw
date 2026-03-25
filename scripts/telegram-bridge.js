@@ -32,12 +32,9 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const API_KEY = process.env.NVIDIA_API_KEY || "";
 const SANDBOX = process.env.SANDBOX_NAME || "nemoclaw";
 const MODEL_NAME = process.env.NEMOCLAW_MODEL || process.env.MODEL_NAME || "configured local model";
-try { validateName(SANDBOX, "SANDBOX_NAME"); } catch (e) { console.error(e.message); process.exit(1); }
 const ALLOWED_CHATS = process.env.ALLOWED_CHAT_IDS
   ? process.env.ALLOWED_CHAT_IDS.split(",").map((s) => s.trim())
   : null;
-
-if (!TOKEN) { console.error("TELEGRAM_BOT_TOKEN required"); process.exit(1); }
 
 let offset = 0;
 const activeSessions = new Map(); // chatId → openclaw session id
@@ -115,6 +112,12 @@ function resetSession(chatId) {
   return next;
 }
 
+function isLatencyMessage(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return /(반응속도|응답속도|속도.*(느리|늦)|응답.*(느리|늦)|반응.*(느리|늦)|버벅|렉|지연)/i.test(normalized);
+}
+
 function getInstantReply(text) {
   const normalized = String(text || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -131,6 +134,10 @@ function getInstantReply(text) {
     return "반응하고 있어요. 간단한 인사나 상태 확인은 제가 바로 답하고, 실제 작업 요청은 이어서 처리할게요.";
   }
 
+  if (isLatencyMessage(normalized)) {
+    return "지금 확인하고 있어요. 짧은 상태 대화는 바로 답하도록 맞추고 있고, 계속 느리면 로그 확인이나 실제 작업 요청으로 이어서 볼게요.";
+  }
+
   if (/(지금\s*(사용|쓰는).*(모델|llm)|어떤\s*모델|현재\s*모델)/i.test(normalized)) {
     return `지금은 ${MODEL_NAME} 모델을 사용 중이에요.`;
   }
@@ -143,13 +150,31 @@ function shouldUseDirectChat(text) {
   if (!normalized) return true;
   if (normalized.startsWith("/")) return false;
 
-  // Route obvious tool/action requests through the full agent.
-  if (/(설치|삭제|수정|고쳐|변경|실행|테스트|커밋|파일|폴더|디렉터리|터미널|명령어|로그|검색|찾아|열어|접속|브라우저|다운로드|업로드|코드|스크립트|샌드박스|sandbox|git|npm|pip|docker|curl|ssh)/i.test(normalized)) {
+  if (isLatencyMessage(normalized)) {
+    return true;
+  }
+
+  const toolTargetPattern = /(파일|폴더|디렉터리|터미널|명령어|로그|페이지|사이트|url|크롬|chrome|브라우저|다운로드|업로드|코드|스크립트|샌드박스|sandbox|git|npm|pip|docker|curl|ssh)/i;
+  if (toolTargetPattern.test(normalized)) {
     return false;
   }
 
-  // Short conversational questions are much faster via direct model chat.
-  return normalized.length <= 120;
+  const testOrActionPattern = /(단위\s*테스트|통합\s*테스트|e2e|pytest|vitest|jest|테스트\s*(돌려|실행|run)|커밋|설치|삭제|수정|고쳐|변경|실행|검색|찾아|열어|접속)/i;
+  if (testOrActionPattern.test(normalized) && normalized.length > 60) {
+    return false;
+  }
+
+  return normalized.length <= 160;
+}
+
+function validateRuntimeConfig() {
+  if (!OPENSHELL) {
+    throw new Error("openshell not found on PATH or in common locations");
+  }
+  validateName(SANDBOX, "SANDBOX_NAME");
+  if (!TOKEN) {
+    throw new Error("TELEGRAM_BOT_TOKEN required");
+  }
 }
 
 function spawnRemoteCommand(remoteCmd, confPath) {
@@ -390,6 +415,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────
 
 async function main() {
+  validateRuntimeConfig();
   const me = await tgApi("getMe", {});
   if (!me.ok) {
     console.error("Failed to connect to Telegram:", JSON.stringify(me));
@@ -413,4 +439,15 @@ async function main() {
   poll();
 }
 
-main();
+module.exports = {
+  getInstantReply,
+  isLatencyMessage,
+  shouldUseDirectChat,
+};
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}
