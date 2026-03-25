@@ -187,10 +187,9 @@ spin() {
 
 command_exists() { command -v "$1" &>/dev/null; }
 
-MIN_NODE_MAJOR=22
+MIN_NODE_VERSION="22.16.0"
 MIN_NPM_MAJOR=10
-RECOMMENDED_NODE_MAJOR=22
-RUNTIME_REQUIREMENT_MSG="NemoClaw requires Node.js >=${MIN_NODE_MAJOR} and npm >=${MIN_NPM_MAJOR}."
+RUNTIME_REQUIREMENT_MSG="NemoClaw requires Node.js >=${MIN_NODE_VERSION} and npm >=${MIN_NPM_MAJOR}."
 NEMOCLAW_SHIM_DIR="${HOME}/.local/bin"
 ORIGINAL_PATH="${PATH:-}"
 
@@ -274,7 +273,7 @@ ensure_supported_runtime() {
   [[ "$node_major" =~ ^[0-9]+$ ]] || error "Could not determine Node.js version from '${node_version}'. ${RUNTIME_REQUIREMENT_MSG}"
   [[ "$npm_major" =~ ^[0-9]+$ ]] || error "Could not determine npm version from '${npm_version}'. ${RUNTIME_REQUIREMENT_MSG}"
 
-  if ((node_major < MIN_NODE_MAJOR || npm_major < MIN_NPM_MAJOR)); then
+  if ! version_gte "${node_version#v}" "$MIN_NODE_VERSION" || ((npm_major < MIN_NPM_MAJOR)); then
     error "Unsupported runtime detected: Node.js ${node_version:-unknown}, npm ${npm_version:-unknown}. ${RUNTIME_REQUIREMENT_MSG} Upgrade Node.js and rerun the installer."
   fi
 
@@ -318,9 +317,9 @@ install_nodejs() {
   spin "Installing nvm..." bash "$nvm_tmp"
   rm -f "$nvm_tmp"
   ensure_nvm_loaded
-  spin "Installing Node.js ${RECOMMENDED_NODE_MAJOR}..." bash -c ". \"$NVM_DIR/nvm.sh\" && nvm install ${RECOMMENDED_NODE_MAJOR} --no-progress"
+  spin "Installing Node.js 22..." bash -c ". \"$NVM_DIR/nvm.sh\" && nvm install 22 --no-progress"
   ensure_nvm_loaded
-  nvm use "${RECOMMENDED_NODE_MAJOR}" --silent
+  nvm use 22 --silent
   info "Node.js installed: $(node --version)"
 }
 

@@ -20,12 +20,12 @@ function writeExecutable(target, contents) {
 // Helpers shared across suites
 // ---------------------------------------------------------------------------
 
-/** Fake node that reports v22.14.0. */
+/** Fake node that reports v22.16.0. */
 function writeNodeStub(fakeBin) {
   writeExecutable(
     path.join(fakeBin, "node"),
     `#!/usr/bin/env bash
-if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then echo "v22.14.0"; exit 0; fi
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then echo "v22.16.0"; exit 0; fi
 if [ "$1" = "-e" ]; then
   if [[ "$2" == *"dependencies.openclaw"* ]]; then
     echo "2026.3.11"
@@ -100,7 +100,7 @@ exit 98
     const output = `${result.stdout}${result.stderr}`;
     expect(result.status).not.toBe(0);
     expect(output).toMatch(/Unsupported runtime detected/);
-    expect(output).toMatch(/Node\.js >=20 and npm >=10/);
+    expect(output).toMatch(/Node\.js >=22\.16\.0 and npm >=10/);
     expect(output).toMatch(/v18\.19\.1/);
     expect(output).toMatch(/9\.8\.1/);
   });
@@ -117,7 +117,7 @@ exit 98
       path.join(fakeBin, "node"),
       `#!/usr/bin/env bash
 if [ "$1" = "--version" ]; then
-  echo "v22.14.0"
+  echo "v22.16.0"
   exit 0
 fi
 if [ "$1" = "-e" ]; then
@@ -212,7 +212,7 @@ exit 98
       path.join(fakeBin, "node"),
       `#!/usr/bin/env bash
 if [ "$1" = "--version" ]; then
-  echo "v22.14.0"
+  echo "v22.16.0"
   exit 0
 fi
 if [ "$1" = "-e" ]; then
@@ -295,7 +295,7 @@ exit 98
       path.join(fakeBin, "node"),
       `#!/usr/bin/env bash
 if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
-  echo "v22.14.0"
+  echo "v22.16.0"
   exit 0
 fi
 exit 99
@@ -375,7 +375,7 @@ echo "Darwin"
       path.join(fakeBin, "node"),
       `#!/usr/bin/env bash
 if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
-  echo "v22.14.0"
+  echo "v22.16.0"
   exit 0
 fi
 if [ "$1" = "-e" ]; then
@@ -641,7 +641,7 @@ fi`,
       path.join(fakeBin, "node"),
       `#!/usr/bin/env bash
 if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
-  echo "v22.14.0"
+  echo "v22.16.0"
   exit 0
 fi
 if [ "$1" = "-e" ]; then
