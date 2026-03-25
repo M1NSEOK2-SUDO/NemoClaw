@@ -100,6 +100,7 @@ async function setupSpark() {
   run(`sudo bash "${SCRIPTS}/setup-spark.sh"`);
 }
 
+// eslint-disable-next-line complexity
 async function deploy(instanceName) {
   if (!instanceName) {
     console.error("  Usage: nemoclaw deploy <instance-name>");
@@ -445,6 +446,7 @@ function help() {
 
 const [cmd, ...args] = process.argv.slice(2);
 
+// eslint-disable-next-line complexity
 (async () => {
   // No command → help
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {

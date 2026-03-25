@@ -39,9 +39,8 @@ export default [
     rules: {
       ...js.configs.recommended.rules,
       "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" }],
-      // Cyclomatic complexity — ratchet down as we refactor:
-      //   95 (current) → 40 → 25 → 15
-      "complexity": ["error", { max: 95 }],
+      // Cyclomatic complexity — ratchet down to 15 as we refactor suppressed functions
+      "complexity": ["error", { max: 20 }],
     },
   },
 

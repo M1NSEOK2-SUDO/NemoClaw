@@ -1515,6 +1515,7 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
 
 // ── Step 4: NIM ──────────────────────────────────────────────────
 
+// eslint-disable-next-line complexity
 async function setupNim(gpu) {
   step(2, 7, "Configuring inference (NIM)");
 
@@ -1915,6 +1916,7 @@ async function setupNim(gpu) {
 
 // ── Step 5: Inference provider ───────────────────────────────────
 
+// eslint-disable-next-line complexity
 async function setupInference(sandboxName, model, provider, endpointUrl = null, credentialEnv = null) {
   step(4, 7, "Setting up inference provider");
   runOpenshell(["gateway", "select", GATEWAY_NAME], { ignoreError: true });
@@ -1998,6 +2000,7 @@ async function setupOpenclaw(sandboxName, model, provider) {
 
 // ── Step 7: Policy presets ───────────────────────────────────────
 
+// eslint-disable-next-line complexity
 async function setupPolicies(sandboxName) {
   step(7, 7, "Policy presets");
 
