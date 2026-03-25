@@ -985,6 +985,25 @@ function copyBuildContextDir(sourceDir, destinationDir) {
     filter: (candidatePath) => shouldIncludeBuildContextPath(sourceDir, candidatePath),
   });
 }
+
+function printSandboxCreateRecoveryHints(output = "") {
+  const text = String(output || "");
+  if (/failed to read image export stream|Timeout error/i.test(text)) {
+    console.error("  Hint: image upload into the OpenShell gateway timed out.");
+    console.error("  Recovery: nemoclaw onboard --resume");
+    console.error("  If this repeats, check Docker memory and retry on a host with more RAM.");
+    return;
+  }
+  if (/Connection reset by peer/i.test(text)) {
+    console.error("  Hint: the image push/import stream was interrupted.");
+    console.error("  Recovery: nemoclaw onboard --resume");
+    console.error("  If this repeats, restart Docker or the gateway and retry.");
+    return;
+  }
+  console.error("  Recovery: nemoclaw onboard --resume");
+  console.error("  Or:      nemoclaw onboard");
+}
+
 async function promptCloudModel() {
   console.log("");
   console.log("  Cloud models:");
@@ -1573,7 +1592,7 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
       console.error(createResult.output);
     }
     console.error("  Try:  openshell sandbox list        # check gateway state");
-    console.error("  Try:  nemoclaw onboard              # retry from scratch");
+    printSandboxCreateRecoveryHints(createResult.output);
     process.exit(createResult.status || 1);
   }
 

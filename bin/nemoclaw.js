@@ -27,6 +27,11 @@ const {
   getCredential,
   isRepoPrivate,
 } = require("./lib/credentials");
+const {
+  classifySandboxLookup,
+  getRecoveryCommand,
+  parseLiveSandboxNames,
+} = require("./lib/runtime-recovery");
 const registry = require("./lib/registry");
 const nim = require("./lib/nim");
 const policies = require("./lib/policies");
@@ -255,7 +260,7 @@ function uninstall(args) {
 
 function showStatus() {
   // Show sandbox registry
-  const { sandboxes, defaultSandbox } = registry.listSandboxes();
+  const { sandboxes, defaultSandbox } = reconcileRegistryWithGateway();
   if (sandboxes.length > 0) {
     console.log("");
     console.log("  Sandboxes:");
@@ -272,7 +277,7 @@ function showStatus() {
 }
 
 function listSandboxes() {
-  const { sandboxes, defaultSandbox } = registry.listSandboxes();
+  const { sandboxes, defaultSandbox } = reconcileRegistryWithGateway();
   if (sandboxes.length === 0) {
     console.log("");
     console.log("  No sandboxes registered. Run `nemoclaw onboard` to get started.");
@@ -296,10 +301,56 @@ function listSandboxes() {
   console.log("");
 }
 
+function reconcileRegistryWithGateway() {
+  const current = registry.listSandboxes();
+  if (current.sandboxes.length === 0) {
+    return current;
+  }
+
+  const statusOutput = runCapture("openshell status 2>&1", { ignoreError: true });
+  if (!statusOutput.includes("Connected")) {
+    return current;
+  }
+
+  const listOutput = runCapture("openshell sandbox list 2>&1", { ignoreError: true });
+  if (!listOutput || /^Error:/m.test(listOutput)) {
+    return current;
+  }
+
+  const liveNames = parseLiveSandboxNames(listOutput);
+  let pruned = 0;
+  for (const sandbox of current.sandboxes) {
+    if (!liveNames.has(sandbox.name)) {
+      if (registry.removeSandbox(sandbox.name)) {
+        pruned += 1;
+      }
+    }
+  }
+
+  const updated = registry.listSandboxes();
+  if (pruned > 0) {
+    console.log(`  Note: removed ${pruned} stale sandbox entr${pruned === 1 ? "y" : "ies"} from local registry.`);
+  }
+  return updated;
+}
+
 // ── Sandbox-scoped actions ───────────────────────────────────────
 
 function sandboxConnect(sandboxName) {
   const qn = shellQuote(sandboxName);
+  const sandboxLookup = runCapture(`openshell sandbox get ${qn} 2>&1`, { ignoreError: true });
+  const sandboxState = classifySandboxLookup(sandboxLookup);
+  if (sandboxState.state === "missing") {
+    registry.removeSandbox(sandboxName);
+    console.error(`  Sandbox '${sandboxName}' is no longer present in OpenShell.`);
+    console.error(`  Recovery: ${getRecoveryCommand()}`);
+    process.exit(1);
+  }
+  if (sandboxState.state === "unavailable") {
+    console.error("  OpenShell gateway is unavailable or out of sync with the recorded sandbox.");
+    console.error(`  Recovery: ${getRecoveryCommand()}`);
+    process.exit(1);
+  }
   // Ensure port forward is alive before connecting
   run(`openshell forward start --background 18789 ${qn} 2>/dev/null || true`, { ignoreError: true });
   runInteractive(`openshell sandbox connect ${qn}`);
@@ -316,8 +367,24 @@ function sandboxStatus(sandboxName) {
     console.log(`    Policies: ${(sb.policies || []).join(", ") || "none"}`);
   }
 
-  // openshell info
-  run(`openshell sandbox get ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
+  const sandboxLookup = runCapture(`openshell sandbox get ${shellQuote(sandboxName)} 2>&1`, { ignoreError: true });
+  const sandboxState = classifySandboxLookup(sandboxLookup);
+  if (sandboxState.state === "missing") {
+    registry.removeSandbox(sandboxName);
+    console.log("");
+    console.log("  Sandbox:");
+    console.log("");
+    console.log(`  Sandbox '${sandboxName}' is no longer present in OpenShell.`);
+    console.log(`  Recovery: ${getRecoveryCommand()}`);
+  } else if (sandboxState.state === "unavailable") {
+    console.log("");
+    console.log("  Sandbox:");
+    console.log("");
+    console.log("  OpenShell gateway is unavailable or out of sync with the recorded sandbox.");
+    console.log(`  Recovery: ${getRecoveryCommand()}`);
+  } else {
+    console.log(sandboxLookup);
+  }
 
   // NIM health
   const nimStat = sb && sb.nimContainer ? nim.nimStatusByName(sb.nimContainer) : nim.nimStatus(sandboxName);
