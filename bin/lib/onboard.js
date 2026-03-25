@@ -42,6 +42,11 @@ const DIM = USE_COLOR ? "\x1b[2m" : "";
 const RESET = USE_COLOR ? "\x1b[0m" : "";
 let OPENSHELL_BIN = null;
 const GATEWAY_NAME = "nemoclaw";
+const GATEWAY_PORT = (() => {
+  const raw = (process.env.NEMOCLAW_GATEWAY_PORT || "8080").trim();
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 8080;
+})();
 
 const BUILD_ENDPOINT_URL = "https://integrate.api.nvidia.com/v1";
 const OPENAI_ENDPOINT_URL = "https://api.openai.com/v1";
@@ -1245,9 +1250,9 @@ async function preflight() {
     console.log("  ✓ Previous session cleaned up");
   }
 
-  // Required ports — gateway (8080) and dashboard (18789)
+  // Required ports — gateway and dashboard.
   const requiredPorts = [
-    { port: 8080, label: "OpenShell gateway" },
+    { port: GATEWAY_PORT, label: "OpenShell gateway" },
     { port: 18789, label: "NemoClaw dashboard" },
   ];
   for (const { port, label } of requiredPorts) {
@@ -1302,7 +1307,7 @@ async function startGateway(_gpu) {
   // Destroy old gateway
   runOpenshell(["gateway", "destroy", "-g", GATEWAY_NAME], { ignoreError: true });
 
-  const gwArgs = ["--name", GATEWAY_NAME];
+  const gwArgs = ["--name", GATEWAY_NAME, "--port", String(GATEWAY_PORT)];
   // Do NOT pass --gpu here. On DGX Spark (and most GPU hosts), inference is
   // routed through a host-side provider (Ollama, vLLM, or cloud API) — the
   // sandbox itself does not need direct GPU access. Passing --gpu causes

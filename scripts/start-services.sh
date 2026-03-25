@@ -123,8 +123,6 @@ do_stop() {
 }
 
 do_start() {
-  [ -n "${NVIDIA_API_KEY:-}" ] || fail "NVIDIA_API_KEY required"
-
   if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
     warn "TELEGRAM_BOT_TOKEN not set — Telegram bridge will not start."
     warn "Create a bot via @BotFather on Telegram and set the token."
@@ -143,7 +141,12 @@ do_start() {
 
   # Telegram bridge (only if token provided)
   if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-    SANDBOX_NAME="$SANDBOX_NAME" start_service telegram-bridge \
+    start_service telegram-bridge \
+      env \
+      TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}" \
+      SANDBOX_NAME="${SANDBOX_NAME}" \
+      NEMOCLAW_MODEL="${NEMOCLAW_MODEL:-}" \
+      NVIDIA_API_KEY="${NVIDIA_API_KEY:-}" \
       node "$REPO_DIR/scripts/telegram-bridge.js"
   fi
 

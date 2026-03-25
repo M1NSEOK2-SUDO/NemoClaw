@@ -11,8 +11,9 @@
  *
  * Env:
  *   TELEGRAM_BOT_TOKEN  — from @BotFather
- *   NVIDIA_API_KEY      — for inference
+ *   NVIDIA_API_KEY      — optional for hosted NVIDIA inference
  *   SANDBOX_NAME        — sandbox name (default: nemoclaw)
+ *   NEMOCLAW_MODEL      — optional display label for the current model
  *   ALLOWED_CHAT_IDS    — comma-separated Telegram chat IDs to accept (optional, accepts all if unset)
  */
 
@@ -28,18 +29,18 @@ if (!OPENSHELL) {
 }
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const API_KEY = process.env.NVIDIA_API_KEY;
+const API_KEY = process.env.NVIDIA_API_KEY || "";
 const SANDBOX = process.env.SANDBOX_NAME || "nemoclaw";
+const MODEL_NAME = process.env.NEMOCLAW_MODEL || process.env.MODEL_NAME || "configured local model";
 try { validateName(SANDBOX, "SANDBOX_NAME"); } catch (e) { console.error(e.message); process.exit(1); }
 const ALLOWED_CHATS = process.env.ALLOWED_CHAT_IDS
   ? process.env.ALLOWED_CHAT_IDS.split(",").map((s) => s.trim())
   : null;
 
 if (!TOKEN) { console.error("TELEGRAM_BOT_TOKEN required"); process.exit(1); }
-if (!API_KEY) { console.error("NVIDIA_API_KEY required"); process.exit(1); }
 
 let offset = 0;
-const activeSessions = new Map(); // chatId → message history
+const activeSessions = new Map(); // chatId → openclaw session id
 
 // ── Telegram API helpers ──────────────────────────────────────────
 
@@ -90,66 +91,217 @@ async function sendTyping(chatId) {
   await tgApi("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
 }
 
+function looksLikeRawToolCall(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /^(?:[a-z_][a-z0-9_]*\s+)?\{.*"name"\s*:\s*"[^"]+".*"arguments"\s*:\s*\{.*\}\s*\}$/is.test(trimmed);
+}
+
+function makeSessionId(chatId) {
+  const safeChatId = String(chatId).replace(/[^a-zA-Z0-9-]/g, "");
+  return `tg-${safeChatId}-${Date.now().toString(36)}`;
+}
+
+function getSessionId(chatId) {
+  if (!activeSessions.has(chatId)) {
+    activeSessions.set(chatId, makeSessionId(chatId));
+  }
+  return activeSessions.get(chatId);
+}
+
+function resetSession(chatId) {
+  const next = makeSessionId(chatId);
+  activeSessions.set(chatId, next);
+  return next;
+}
+
+function getInstantReply(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (/^(하이|ㅎㅇ|안녕|안녕[?？!]??|안녕하세요|hello|hi)\s*$/i.test(normalized)) {
+    return "안녕하세요. 반응 잘 하고 있어요. 무엇을 도와드릴까요?";
+  }
+
+  if (/^(오|오오|오케이|ok|ㅇㅋ|응|웅|ㅇㅇ)\s*$/i.test(normalized)) {
+    return "네, 듣고 있어요. 이어서 말씀해 주세요.";
+  }
+
+  if (/(반응이?\s*없|응답이?\s*없|답이?\s*없|살아있|멈춘거|멈춘 거|왜 답)/i.test(normalized)) {
+    return "반응하고 있어요. 간단한 인사나 상태 확인은 제가 바로 답하고, 실제 작업 요청은 이어서 처리할게요.";
+  }
+
+  if (/(지금\s*(사용|쓰는).*(모델|llm)|어떤\s*모델|현재\s*모델)/i.test(normalized)) {
+    return `지금은 ${MODEL_NAME} 모델을 사용 중이에요.`;
+  }
+
+  return null;
+}
+
+function shouldUseDirectChat(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return true;
+  if (normalized.startsWith("/")) return false;
+
+  // Route obvious tool/action requests through the full agent.
+  if (/(설치|삭제|수정|고쳐|변경|실행|테스트|커밋|파일|폴더|디렉터리|터미널|명령어|로그|검색|찾아|열어|접속|브라우저|다운로드|업로드|코드|스크립트|샌드박스|sandbox|git|npm|pip|docker|curl|ssh)/i.test(normalized)) {
+    return false;
+  }
+
+  // Short conversational questions are much faster via direct model chat.
+  return normalized.length <= 120;
+}
+
+function spawnRemoteCommand(remoteCmd, confPath) {
+  return spawn("ssh", [
+    "-T",
+    "-F", confPath,
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "ConnectTimeout=10",
+    "-o", "LogLevel=ERROR",
+    `openshell-${SANDBOX}`,
+    remoteCmd,
+  ], {
+    timeout: 120000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function collectRemoteOutput(proc, confPath, confDir, onDone) {
+  let stdout = "";
+  let stderr = "";
+
+  proc.stdout.on("data", (d) => (stdout += d.toString()));
+  proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+  proc.on("close", (code, signal) => {
+    try { require("fs").unlinkSync(confPath); require("fs").rmdirSync(confDir); } catch { /* ignored */ }
+    onDone(code, signal, stdout, stderr);
+  });
+
+  proc.on("error", (err) => {
+    try { require("fs").unlinkSync(confPath); require("fs").rmdirSync(confDir); } catch { /* ignored */ }
+    onDone(1, null, "", `Error: ${err.message}`);
+  });
+}
+
+function createSshConfig() {
+  const sshConfig = execFileSync(OPENSHELL, ["sandbox", "ssh-config", SANDBOX], { encoding: "utf-8" });
+  const confDir = require("fs").mkdtempSync("/tmp/nemoclaw-tg-ssh-");
+  const confPath = `${confDir}/config`;
+  require("fs").writeFileSync(confPath, sshConfig, { mode: 0o600 });
+  return { confDir, confPath };
+}
+
+function sanitizeOutput(combinedOutput) {
+  const lines = combinedOutput.split("\n");
+  return lines.filter(
+    (l) =>
+      !l.startsWith("Setting up NemoClaw") &&
+      !l.startsWith("[gateway]") &&
+      !l.startsWith("[diagnostic]") &&
+      !l.startsWith("[model-fallback/decision]") &&
+      !l.startsWith("[plugins]") &&
+      !l.startsWith("(node:") &&
+      !l.startsWith("(Use `node --trace-warnings") &&
+      !l.startsWith("Warning: Permanently added") &&
+      !l.includes("NemoClaw ready") &&
+      !l.includes("NemoClaw registered") &&
+      !l.includes("openclaw agent") &&
+      !l.includes("┌─") &&
+      !l.includes("│ ") &&
+      !l.includes("└─") &&
+      l.trim() !== "",
+  ).join("\n").trim();
+}
+
+function runDirectChatInSandbox(message) {
+  return new Promise((resolve) => {
+    const { confDir, confPath } = createSshConfig();
+    const promptB64 = Buffer.from(String(message), "utf8").toString("base64");
+    const systemB64 = Buffer.from(
+      "You are NemoClaw's Telegram assistant. Reply briefly in Korean unless the user clearly asks for another language. Be concise and practical.",
+      "utf8",
+    ).toString("base64");
+    const pythonCode = [
+      "import base64, json, os, ssl, urllib.request",
+      "message = base64.b64decode(os.environ['MSG_B64']).decode('utf-8')",
+      "system = base64.b64decode(os.environ['SYS_B64']).decode('utf-8')",
+      "body = {",
+      "  'model': os.environ.get('MODEL_NAME', 'llama3.1'),",
+      "  'messages': [",
+      "    {'role': 'system', 'content': system},",
+      "    {'role': 'user', 'content': message},",
+      "  ],",
+      "  'stream': False,",
+      "}",
+      "req = urllib.request.Request(",
+      "  'https://inference.local/v1/chat/completions',",
+      "  data=json.dumps(body).encode(),",
+      "  headers={'Content-Type': 'application/json'},",
+      ")",
+      "ctx = ssl.create_default_context()",
+      "with urllib.request.urlopen(req, timeout=120, context=ctx) as r:",
+      "  data = json.loads(r.read().decode())",
+      "  print(data['choices'][0]['message']['content'])",
+    ].join("\n");
+    const remoteCmd = `MSG_B64=${shellQuote(promptB64)} SYS_B64=${shellQuote(systemB64)} MODEL_NAME=${shellQuote(MODEL_NAME)} python3 -c ${shellQuote(pythonCode)}`;
+
+    const proc = spawnRemoteCommand(remoteCmd, confPath);
+    collectRemoteOutput(proc, confPath, confDir, (code, signal, stdout, stderr) => {
+      const response = sanitizeOutput([stdout, stderr].filter(Boolean).join("\n"));
+      if (response && code === 0) {
+        resolve(response);
+        return;
+      }
+      const compactError = response || [stdout, stderr].filter(Boolean).join("\n").trim().slice(0, 500);
+      resolve(`Direct chat exited with code ${code}${signal ? ` (${signal})` : ""}. ${compactError}`.trim());
+    });
+  });
+}
+
 // ── Run agent inside sandbox ──────────────────────────────────────
 
 function runAgentInSandbox(message, sessionId) {
   return new Promise((resolve) => {
-    const sshConfig = execFileSync(OPENSHELL, ["sandbox", "ssh-config", SANDBOX], { encoding: "utf-8" });
+    const { confDir, confPath } = createSshConfig();
 
-    // Write temp ssh config with unpredictable name
-    const confDir = require("fs").mkdtempSync("/tmp/nemoclaw-tg-ssh-");
-    const confPath = `${confDir}/config`;
-    require("fs").writeFileSync(confPath, sshConfig, { mode: 0o600 });
+    const remoteSessionId = String(sessionId).replace(/[^a-zA-Z0-9-]/g, "");
+    const sessionLockPath = `/sandbox/.openclaw-data/agents/main/sessions/${remoteSessionId}.jsonl.lock`;
+    const exportPrefix = API_KEY ? `export NVIDIA_API_KEY=${shellQuote(API_KEY)}; ` : "";
+    const cmd = `rm -f ${shellQuote(sessionLockPath)} 2>/dev/null || true; ${exportPrefix}nemoclaw-start openclaw agent --agent main --local -m ${shellQuote(message)} --session-id ${shellQuote(remoteSessionId)}`;
+    const proc = spawnRemoteCommand(cmd, confPath);
 
-    // Pass message and API key via stdin to avoid shell interpolation.
-    // The remote command reads them from environment/stdin rather than
-    // embedding user content in a shell string.
-    const safeSessionId = String(sessionId).replace(/[^a-zA-Z0-9-]/g, "");
-    const cmd = `export NVIDIA_API_KEY=${shellQuote(API_KEY)} && nemoclaw-start openclaw agent --agent main --local -m ${shellQuote(message)} --session-id ${shellQuote("tg-" + safeSessionId)}`;
+    collectRemoteOutput(proc, confPath, confDir, (code, signal, stdout, stderr) => {
+      const combinedOutput = [stdout, stderr].filter(Boolean).join("\n");
+      const response = sanitizeOutput(combinedOutput);
 
-    const proc = spawn("ssh", ["-T", "-F", confPath, `openshell-${SANDBOX}`, cmd], {
-      timeout: 120000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-
-    proc.on("close", (code) => {
-      try { require("fs").unlinkSync(confPath); require("fs").rmdirSync(confDir); } catch { /* ignored */ }
-
-      // Extract the actual agent response — skip setup lines
-      const lines = stdout.split("\n");
-      const responseLines = lines.filter(
-        (l) =>
-          !l.startsWith("Setting up NemoClaw") &&
-          !l.startsWith("[plugins]") &&
-          !l.startsWith("(node:") &&
-          !l.includes("NemoClaw ready") &&
-          !l.includes("NemoClaw registered") &&
-          !l.includes("openclaw agent") &&
-          !l.includes("┌─") &&
-          !l.includes("│ ") &&
-          !l.includes("└─") &&
-          l.trim() !== "",
-      );
-
-      const response = responseLines.join("\n").trim();
-
-      if (response) {
+      if (response && code === 0) {
+        if (looksLikeRawToolCall(response)) {
+          resolve("현재 로컬 모델이 최종 답변 대신 도구 호출만 반환하고 있습니다. 이 설정에서는 qwen2.5가 OpenClaw와 잘 맞지 않아 보여서, 다른 Ollama 모델로 바꾸는 게 필요합니다.");
+          return;
+        }
         resolve(response);
-      } else if (code !== 0) {
-        resolve(`Agent exited with code ${code}. ${stderr.trim().slice(0, 500)}`);
+        return;
+      }
+
+      if (code !== 0) {
+        if (/session file locked/i.test(combinedOutput)) {
+          resolve("이전 요청 세션이 잠겨 있어 이번 메시지를 처리하지 못했습니다. 잠시 후 다시 보내 주세요.");
+          return;
+        }
+
+        if (/FailoverError|timeout/i.test(combinedOutput)) {
+          resolve("모델 응답이 제한 시간 안에 돌아오지 않았습니다. 잠시 후 다시 시도해 주세요.");
+          return;
+        }
+
+        const compactError = response || combinedOutput.trim().split("\n").slice(-3).join("\n").slice(0, 500);
+        resolve(`Agent exited with code ${code}${signal ? ` (${signal})` : ""}. ${compactError}`.trim());
       } else {
         resolve("(no response)");
       }
-    });
-
-    proc.on("error", (err) => {
-      resolve(`Error: ${err.message}`);
     });
   });
 }
@@ -180,11 +332,13 @@ async function poll() {
 
         // Handle /start
         if (msg.text === "/start") {
+          resetSession(chatId);
           await sendMessage(
             chatId,
-            "🦀 *NemoClaw* — powered by Nemotron 3 Super 120B\n\n" +
+            "🦀 *NemoClaw*\n\n" +
               "Send me a message and I'll run it through the OpenClaw agent " +
               "inside an OpenShell sandbox.\n\n" +
+              `Current model: *${MODEL_NAME}*\n\n` +
               "If the agent needs external access, the TUI will prompt for approval.",
             msg.message_id,
           );
@@ -193,8 +347,15 @@ async function poll() {
 
         // Handle /reset
         if (msg.text === "/reset") {
-          activeSessions.delete(chatId);
+          const nextSessionId = resetSession(chatId);
+          console.log(`[${chatId}] session reset -> ${nextSessionId}`);
           await sendMessage(chatId, "Session reset.", msg.message_id);
+          continue;
+        }
+
+        const instantReply = getInstantReply(msg.text);
+        if (instantReply) {
+          await sendMessage(chatId, instantReply, msg.message_id);
           continue;
         }
 
@@ -205,9 +366,12 @@ async function poll() {
         const typingInterval = setInterval(() => sendTyping(chatId), 4000);
 
         try {
-          const response = await runAgentInSandbox(msg.text, chatId);
+          const startedAt = Date.now();
+          const response = shouldUseDirectChat(msg.text)
+            ? await runDirectChatInSandbox(msg.text)
+            : await runAgentInSandbox(msg.text, getSessionId(chatId));
           clearInterval(typingInterval);
-          console.log(`[${chatId}] agent: ${response.slice(0, 100)}...`);
+          console.log(`[${chatId}] reply (${Date.now() - startedAt}ms): ${response.slice(0, 100)}...`);
           await sendMessage(chatId, response, msg.message_id);
         } catch (err) {
           clearInterval(typingInterval);
@@ -238,7 +402,7 @@ async function main() {
   console.log("  │                                                     │");
   console.log(`  │  Bot:      @${(me.result.username + "                    ").slice(0, 37)}│`);
   console.log("  │  Sandbox:  " + (SANDBOX + "                              ").slice(0, 40) + "│");
-  console.log("  │  Model:    nvidia/nemotron-3-super-120b-a12b       │");
+  console.log("  │  Model:    " + (MODEL_NAME + "                              ").slice(0, 40) + "│");
   console.log("  │                                                     │");
   console.log("  │  Messages are forwarded to the OpenClaw agent      │");
   console.log("  │  inside the sandbox. Run 'openshell term' in       │");
